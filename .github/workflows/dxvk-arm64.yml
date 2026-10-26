@@ -1,0 +1,49 @@
+# Lean build of just what the DXVK work needs: arm64 DXVK (d3d9) + SDL2 + FAudio. Run it by hand from the Actions tab.
+# Nothing here touches game files or code generated from them, so a public fork is fine.
+# Any android/patches/dxvk-*.patch in the repo is applied automatically by android/build-deps.sh (sorted by name).
+name: dxvk-arm64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build glslang-tools pkg-config python3-pip
+          pip3 install --user --break-system-packages meson==1.5.2
+
+      - name: Build
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+        run: |
+          export PATH=$HOME/.local/bin:$PATH
+          echo "NDK: $ANDROID_NDK_HOME"
+          android/build-deps.sh arm64-v8a deps-src out/arm64-v8a
+          ls -l out/arm64-v8a/lib/*.so
+          sha256sum out/arm64-v8a/lib/libdxvk_d3d9.so
+
+      # The three libraries; libdxvk_d3d9.so is the one that replaces lib/arm64-v8a/libdxvk_d3d9.so inside the APK.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dxvk-arm64-libs
+          path: out/arm64-v8a/lib/*.so
+          retention-days: 30
+
+      # Exact (already patched) DXVK sources, small, so patches can be written and checked against the real code.
+      - name: Pack DXVK sources
+        run: |
+          tar -C deps-src/dxvk --exclude=.git --exclude=subprojects --exclude=tests --exclude='*.png' \
+              -czf "$PWD/dxvk-src.tar.gz" .
+          ls -l dxvk-src.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dxvk-source
+          path: dxvk-src.tar.gz
+          retention-days: 30
