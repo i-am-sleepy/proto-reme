@@ -3,7 +3,9 @@
 #   plain = the repo's android/patches/dxvk-*.patch only   (must behave exactly like the DXVK in the stock APK)
 #   tuned = plain + android/dxvk-passlog.py   (DXVK_PASS_LOG=<N>: logs every render pass of one frame in N)
 #                 + android/dxvk-flushtune.py (DXVK_FLUSH_HINT_CHUNKS=<n>: fewer mid-frame submits on tile GPUs)
-#           Both are inert unless their variable is set in env.ini, so "tuned" starts out behaving like "plain".
+#                 + android/dxvk-extras.py    (persistent pipeline cache, ON by default; DXVK_MAX_ANISO=<n> cap)
+#           passlog/flushtune/aniso are inert unless their variable is set in env.ini. The pipeline cache is the one
+#           deliberate behaviour change: compiled shaders are kept in dxvk_pipeline.cache next to the other app data.
 # No game files are involved, so a public fork is fine.
 #
 # Why the clone/patch steps are spelled out here: android/build-deps.sh applies patches with
@@ -47,6 +49,7 @@ jobs:
           if [ "${{ matrix.variant }}" = tuned ]; then
             python3 android/dxvk-passlog.py deps-src/dxvk
             python3 android/dxvk-flushtune.py deps-src/dxvk
+            python3 android/dxvk-extras.py deps-src/dxvk
           fi
 
       - name: Build
@@ -64,6 +67,8 @@ jobs:
           if [ "${{ matrix.variant }}" = tuned ]; then
             grep -aq 'passlog f' "$lib"
             grep -aq 'DXVK_FLUSH_HINT_CHUNKS' "$lib"
+            grep -aq 'pipeline cache: saved' "$lib"
+            grep -aq 'DXVK_MAX_ANISO' "$lib"
           fi
           echo "verified: patched code is in the library"
 
