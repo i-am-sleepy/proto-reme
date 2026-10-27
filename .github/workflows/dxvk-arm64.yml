@@ -1,6 +1,13 @@
-# Lean build of just what the DXVK work needs: arm64 DXVK (d3d9) + SDL2 + FAudio. Run it by hand from the Actions tab.
-# Nothing here touches game files or code generated from them, so a public fork is fine.
-# Any android/patches/dxvk-*.patch in the repo is applied automatically by android/build-deps.sh (sorted by name).
+# Builds arm64 DXVK (d3d9) for the Android port. Run by hand: Actions tab -> dxvk-arm64 -> Run workflow.
+# Two variants run side by side:
+#   plain   = the repo's android/patches/dxvk-*.patch only   (must behave exactly like the DXVK in the stock APK)
+#   passlog = plain + android/dxvk-passlog.py (logs every render pass when DXVK_PASS_LOG=<N> is set; inert otherwise)
+# No game files are involved, so a public fork is fine.
+#
+# Why the clone/patch steps are spelled out here: android/build-deps.sh applies patches with
+#   git -C <dir> apply --check <relative path> 2>/dev/null
+# which cannot find a relative path after -C and silently skips the patch -> an UNPATCHED DXVK that aborts in
+# Direct3DCreate9 on Android. Here the patches are applied with absolute paths and the result is verified.
 name: dxvk-arm64
 
 on:
@@ -8,6 +15,10 @@ on:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [plain, passlog]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -19,31 +30,39 @@ jobs:
           sudo apt-get install -y --no-install-recommends ninja-build glslang-tools pkg-config python3-pip
           pip3 install --user --break-system-packages meson==1.5.2
 
+      - name: Fetch DXVK, apply the Android patches (fails loudly), verify
+        run: |
+          set -euo pipefail
+          tag=$(grep -oP '^DXVK_TAG=\K\S+' android/build-deps.sh)
+          echo "DXVK $tag"
+          git clone -q --depth 1 --branch "$tag" --recurse-submodules --shallow-submodules \
+              https://github.com/doitsujin/dxvk.git deps-src/dxvk
+          for p in android/patches/dxvk-*.patch; do
+            echo "applying $p"
+            git -C deps-src/dxvk apply "$GITHUB_WORKSPACE/$p"
+          done
+          grep -rq 'Android port' deps-src/dxvk/src            # marker text that only the patched source has
+          if [ "${{ matrix.variant }}" = passlog ]; then
+            python3 android/dxvk-passlog.py deps-src/dxvk
+          fi
+
       - name: Build
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: |
+          set -euo pipefail
           export PATH=$HOME/.local/bin:$PATH
           echo "NDK: $ANDROID_NDK_HOME"
-          android/build-deps.sh arm64-v8a deps-src out/arm64-v8a
-          ls -l out/arm64-v8a/lib/*.so
-          sha256sum out/arm64-v8a/lib/libdxvk_d3d9.so
+          # absolute script path: also makes its own patch lookup work for SDL2/FAudio
+          bash "$GITHUB_WORKSPACE/android/build-deps.sh" arm64-v8a deps-src out/arm64-v8a
+          lib=out/arm64-v8a/lib/libdxvk_d3d9.so
+          ls -l "$lib"; sha256sum "$lib"
+          grep -aq 'latency wait' "$lib"                        # present-stats text from the Android patch is inside
+          if [ "${{ matrix.variant }}" = passlog ]; then grep -aq 'passlog f' "$lib"; fi
+          echo "verified: patched code is in the library"
 
-      # The three libraries; libdxvk_d3d9.so is the one that replaces lib/arm64-v8a/libdxvk_d3d9.so inside the APK.
       - uses: actions/upload-artifact@v4
         with:
-          name: dxvk-arm64-libs
-          path: out/arm64-v8a/lib/*.so
-          retention-days: 30
-
-      # Exact (already patched) DXVK sources, small, so patches can be written and checked against the real code.
-      - name: Pack DXVK sources
-        run: |
-          tar -C deps-src/dxvk --exclude=.git --exclude=subprojects --exclude=tests --exclude='*.png' \
-              -czf "$PWD/dxvk-src.tar.gz" .
-          ls -l dxvk-src.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dxvk-source
-          path: dxvk-src.tar.gz
+          name: libdxvk_d3d9-${{ matrix.variant }}
+          path: out/arm64-v8a/lib/libdxvk_d3d9.so
           retention-days: 30
