@@ -1,7 +1,9 @@
 # Builds arm64 DXVK (d3d9) for the Android port. Run by hand: Actions tab -> dxvk-arm64 -> Run workflow.
 # Two variants run side by side:
-#   plain   = the repo's android/patches/dxvk-*.patch only   (must behave exactly like the DXVK in the stock APK)
-#   passlog = plain + android/dxvk-passlog.py (logs every render pass when DXVK_PASS_LOG=<N> is set; inert otherwise)
+#   plain = the repo's android/patches/dxvk-*.patch only   (must behave exactly like the DXVK in the stock APK)
+#   tuned = plain + android/dxvk-passlog.py   (DXVK_PASS_LOG=<N>: logs every render pass of one frame in N)
+#                 + android/dxvk-flushtune.py (DXVK_FLUSH_HINT_CHUNKS=<n>: fewer mid-frame submits on tile GPUs)
+#           Both are inert unless their variable is set in env.ini, so "tuned" starts out behaving like "plain".
 # No game files are involved, so a public fork is fine.
 #
 # Why the clone/patch steps are spelled out here: android/build-deps.sh applies patches with
@@ -18,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [plain, passlog]
+        variant: [plain, tuned]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -42,8 +44,9 @@ jobs:
             git -C deps-src/dxvk apply "$GITHUB_WORKSPACE/$p"
           done
           grep -rq 'Android port' deps-src/dxvk/src            # marker text that only the patched source has
-          if [ "${{ matrix.variant }}" = passlog ]; then
+          if [ "${{ matrix.variant }}" = tuned ]; then
             python3 android/dxvk-passlog.py deps-src/dxvk
+            python3 android/dxvk-flushtune.py deps-src/dxvk
           fi
 
       - name: Build
@@ -58,7 +61,10 @@ jobs:
           lib=out/arm64-v8a/lib/libdxvk_d3d9.so
           ls -l "$lib"; sha256sum "$lib"
           grep -aq 'latency wait' "$lib"                        # present-stats text from the Android patch is inside
-          if [ "${{ matrix.variant }}" = passlog ]; then grep -aq 'passlog f' "$lib"; fi
+          if [ "${{ matrix.variant }}" = tuned ]; then
+            grep -aq 'passlog f' "$lib"
+            grep -aq 'DXVK_FLUSH_HINT_CHUNKS' "$lib"
+          fi
           echo "verified: patched code is in the library"
 
       - uses: actions/upload-artifact@v4
