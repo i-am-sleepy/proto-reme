@@ -4,6 +4,7 @@
 #   tuned = plain + android/dxvk-passlog.py   (DXVK_PASS_LOG=<N>: logs every render pass of one frame in N)
 #                 + android/dxvk-flushtune.py (DXVK_FLUSH_HINT_CHUNKS=<n>: fewer mid-frame submits on tile GPUs)
 #                 + android/dxvk-extras.py    (persistent pipeline cache, ON by default; DXVK_MAX_ANISO=<n> cap)
+#                 + android/dxvk-passtime.py  (with DXVK_PASS_LOG: GPU milliseconds per render pass, "passgpu" lines)
 #           passlog/flushtune/aniso are inert unless their variable is set in env.ini. The pipeline cache is the one
 #           deliberate behaviour change: compiled shaders are kept in dxvk_pipeline.cache next to the other app data.
 # No game files are involved, so a public fork is fine.
@@ -50,6 +51,7 @@ jobs:
             python3 android/dxvk-passlog.py deps-src/dxvk
             python3 android/dxvk-flushtune.py deps-src/dxvk
             python3 android/dxvk-extras.py deps-src/dxvk
+            python3 android/dxvk-passtime.py deps-src/dxvk
           fi
 
       - name: Build
@@ -69,6 +71,7 @@ jobs:
             grep -aq 'DXVK_FLUSH_HINT_CHUNKS' "$lib"
             grep -aq 'pipeline cache: saved' "$lib"
             grep -aq 'DXVK_MAX_ANISO' "$lib"
+            grep -aq 'passgpu f' "$lib"
           fi
           echo "verified: patched code is in the library"
 
